@@ -248,6 +248,42 @@ class WandbLogger(object):
         self._wandb.define_metric('Global Train/*', step_metric='epoch')
         self._wandb.define_metric('Global Test/*', step_metric='epoch')
 
+class DclsVisualizer(object):
+    def __init__(self, wandb_logger=None, num_bins=7, num_stages = 4):
+        self.wandb_logger = wandb_logger        
+        self.num_bins = num_bins
+        self.p_prev = {}
+        self.num_stages = num_stages
+
+    def log_layer(self, model, stage, block):
+        key = 's{stage},b{block}'.format(stage=stage,block=block)
+        p = model.module.stages[stage][block].dwconv
+        numel = p.out_channels * p.in_channels//p.groups * p.kernel_count
+        scaling =  p.gain * math.sqrt(numel)
+        p_grad = p.P.grad
+        p = p.P * scaling
+        
+        if key not in self.p_prev: 
+            self.p_prev[key] = torch.zeros_like(p)
+
+        speed = (p - self.p_prev[key]).abs().mean()        
+        
+        #self.wandb_logger._wandb.log({'Dcls pos ({stage},{block})/P avg'.format(stage=stage,block=block): p.mean()}) 
+        self.wandb_logger._wandb.log({'Dcls pos |P| max/(s{stage},b{block})'.format(stage=stage,block=block): p.abs().max()})
+        #self.wandb_logger._wandb.log({'Dcls pos ({stage},{block})/P >= 1'.format(stage=stage,block=block): (p[p.abs() >= 1]).numel()/p.numel()})                 
+        #self.wandb_logger._wandb.log({'Dcls pos ({stage},{block})/P_grad avg'.format(stage=stage,block=block): p_grad.mean()})
+        #self.wandb_logger._wandb.log({'Dcls pos ({stage},{block})/P_grad max'.format(stage=stage,block=block): p_grad.abs().max()})  
+        self.wandb_logger._wandb.log({'Dcls pos avg speed/(s{stage},b{block})'.format(stage=stage,block=block): speed}) 
+        
+        self.wandb_logger._wandb.log({"Dcls heatmap hists/(s{stage},b{block})".format(stage=stage,block=block): self.wandb_logger._wandb.Histogram(p.detach().cpu(), num_bins=self.num_bins)})        
+ 
+        
+        self.p_prev[key] = p
+        
+    def log_all_layers(self, model):
+        for stage in range(self.num_stages):
+            for block in range(model.module.depths[stage]):
+                self.log_layer(model, stage, block) 
 
 def setup_for_distributed(is_master):
     """

@@ -31,6 +31,7 @@ from utils import NativeScalerWithGradNormCount as NativeScaler
 import utils
 import models.convnext
 import models.convnext_isotropic
+import models.convmixer
 
 def str2bool(v):
     """
@@ -198,6 +199,11 @@ def get_args_parser():
                         help="The name of the W&B project where you're sending the new run.")
     parser.add_argument('--wandb_ckpt', type=str2bool, default=False,
                         help="Save model checkpoints as W&B Artifacts.")
+    
+    parser.add_argument('--use_dcls', type=str2bool, default=False,
+                        help='Enabling dcls convolutions')    
+    parser.add_argument('--dcls_gain', default=1.0, type=float,
+                        help='Dcls gain')    
 
     return parser
 
@@ -246,6 +252,11 @@ def main(args):
         wandb_logger = utils.WandbLogger(args)
     else:
         wandb_logger = None
+        
+    if global_rank == 0 and wandb_logger and args.use_dcls:
+        dcls_logger = utils.DclsVisualizer(wandb_logger=wandb_logger, num_bins=7)
+    else:
+        dcls_logger = None
 
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
@@ -282,6 +293,8 @@ def main(args):
         drop_path_rate=args.drop_path,
         layer_scale_init_value=args.layer_scale_init_value,
         head_init_scale=args.head_init_scale,
+        use_dcls = args.use_dcls,
+        dcls_gain=args.dcls_gain
         )
 
     if args.finetune:
@@ -407,6 +420,9 @@ def main(args):
             num_training_steps_per_epoch=num_training_steps_per_epoch, update_freq=args.update_freq,
             use_amp=args.use_amp
         )
+        if args.use_dcls :
+            dcls_logger.log_all_layers(model)
+            
         if args.output_dir and args.save_ckpt:
             if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:
                 utils.save_model(
