@@ -247,6 +247,9 @@ class WandbLogger(object):
         # Set epoch-wise step
         self._wandb.define_metric('Global Train/*', step_metric='epoch')
         self._wandb.define_metric('Global Test/*', step_metric='epoch')
+        self._wandb.define_metric('Dcls pos |P| max/*', step_metric='epoch')  
+        self._wandb.define_metric('Dcls pos avg speed/*', step_metric='epoch')  
+        self._wandb.define_metric('Dcls heatmap hists/*', step_metric='epoch')          
 
 class DclsVisualizer(object):
     def __init__(self, wandb_logger=None, num_bins=7, num_stages = 4):
@@ -275,7 +278,7 @@ class DclsVisualizer(object):
         #self.wandb_logger._wandb.log({'Dcls pos ({stage},{block})/P_grad max'.format(stage=stage,block=block): p_grad.abs().max()})  
         self.wandb_logger._wandb.log({'Dcls pos avg speed/(s{stage},b{block})'.format(stage=stage,block=block): speed}) 
         
-        self.wandb_logger._wandb.log({"Dcls heatmap hists/(s{stage},b{block})".format(stage=stage,block=block): self.wandb_logger._wandb.Histogram(p.detach().cpu(), num_bins=self.num_bins)})        
+        self.wandb_logger._wandb.log({'Dcls heatmap hists/(s{stage},b{block})'.format(stage=stage,block=block): self.wandb_logger._wandb.Histogram(p.detach().cpu(), num_bins=self.num_bins)})        
  
         
         self.p_prev[key] = p
