@@ -254,6 +254,8 @@ def main(args):
         wandb_logger = None
         
     if global_rank == 0 and wandb_logger and args.use_dcls:
+        print("init dcls visualizer")
+        print(wandb_logger)        
         dcls_logger = utils.DclsVisualizer(wandb_logger=wandb_logger, num_bins=7)
     else:
         dcls_logger = None
@@ -418,9 +420,9 @@ def main(args):
             log_writer=log_writer, wandb_logger=wandb_logger, start_steps=epoch * num_training_steps_per_epoch,
             lr_schedule_values=lr_schedule_values, wd_schedule_values=wd_schedule_values,
             num_training_steps_per_epoch=num_training_steps_per_epoch, update_freq=args.update_freq,
-            use_amp=args.use_amp
+            use_amp=args.use_amp, use_dcls=args.use_dcls
         )
-        if args.use_dcls :
+        if args.use_dcls and global_rank == 0:
             dcls_logger.log_all_layers(model)
             
         if args.output_dir and args.save_ckpt:
