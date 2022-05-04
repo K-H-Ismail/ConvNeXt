@@ -15,6 +15,8 @@ import torch.nn as nn
 import torch.backends.cudnn as cudnn
 import json
 import os
+import torchvision
+import timm
 
 from pathlib import Path
 
@@ -215,6 +217,7 @@ def get_args_parser():
 
 def main(args):
     utils.init_distributed_mode(args)
+    print(torch.__version__, torchvision.__version__, timm.__version__)
     print(args)
     device = torch.device(args.device)
 
