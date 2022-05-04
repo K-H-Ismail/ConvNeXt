@@ -19,7 +19,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     device: torch.device, epoch: int, loss_scaler, max_norm: float = 0,
                     model_ema: Optional[ModelEma] = None, mixup_fn: Optional[Mixup] = None, log_writer=None,
                     wandb_logger=None, start_steps=None, lr_schedule_values=None, wd_schedule_values=None,
-                    num_training_steps_per_epoch=None, update_freq=None, use_amp=False, use_dcls=False):
+                    num_training_steps_per_epoch=None, update_freq=None, use_amp=False, use_dcls=False, dcls_kernel_size=7):
     model.train(True)
     metric_logger = utils.MetricLogger(delimiter="  ")
     metric_logger.add_meter('lr', utils.SmoothedValue(window_size=1, fmt='{value:.6f}'))
@@ -38,7 +38,10 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         if lr_schedule_values is not None or wd_schedule_values is not None and data_iter_step % update_freq == 0:
             for i, param_group in enumerate(optimizer.param_groups):
                 if lr_schedule_values is not None:
-                    param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]
+                    if param_group["group_name"] == "no_decay_dcls":
+                        param_group["lr"] = 0.02*(0.98**epoch) 
+                    else:
+                        param_group["lr"] = lr_schedule_values[it] * param_group["lr_scale"]
                 if wd_schedule_values is not None and param_group["weight_decay"] > 0:
                     param_group["weight_decay"] = wd_schedule_values[it]
 
@@ -57,18 +60,21 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             loss = criterion(output, targets)
         
         loss_rep = torch.zeros_like(loss)
-        layer_count = 0
+        loss_fit = loss
         if use_dcls:
+            layer_count = 0
             for name, param in model.named_parameters():
                 if name.endswith(".P"):
                     layer_count += 1
-                    P = param.permute(1,2,3,0).contiguous()
-                    chout, chin, k_count = P.size(0), P.size(1), P.size(2)
+                    chout, chin, k_count = param.size(1), param.size(2), param.size(3) 
+                    P = param.view(2, chout * chin, k_count)                        
+                    P = P.permute(1,2,0).contiguous() 
                     distances = torch.cdist(P,P,p=2)
                     distances_triu = (1-distances).triu(diagonal=1)
                     loss_rep += 2*torch.sum(torch.clamp_min(distances_triu , min=0)) / (k_count*(k_count-1)*chout*chin)
             loss_rep /= layer_count
-            loss = loss + 0.001*loss_rep 
+
+            loss = loss + loss_rep ** 2
                     
         loss_value = loss.item() 
 
@@ -96,6 +102,15 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 if model_ema is not None:
                     model_ema.update(model)
 
+        if use_dcls:            
+            with torch.no_grad():
+                lim = dcls_kernel_size // 2
+                for i in range(4):
+                    if hasattr(model, 'module'):
+                        model.module.stages[i][0].dwconv.P.clamp_(-lim, lim)
+                    else:
+                        model.stages[i][0].dwconv.P.clamp_(-lim, lim)
+
         torch.cuda.synchronize()
 
         if mixup_fn is None:
@@ -103,6 +118,9 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
         else:
             class_acc = None
         metric_logger.update(loss=loss_value)
+        metric_logger.update(loss_fit=loss_fit)
+        metric_logger.update(loss_rep=loss_rep)
+        metric_logger.update(lr_pos=0.02*(0.98**epoch))
         metric_logger.update(class_acc=class_acc)
         min_lr = 10.
         max_lr = 0.
@@ -132,8 +150,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
 
         if wandb_logger:
             wandb_logger._wandb.log({
-                'Rank-0 Batch Wise/train_loss': loss_value,
-                'Rank-0 Batch Wise/train_loss_rep': loss_rep, #TODO: if dcls                
+                'Rank-0 Batch Wise/train_loss': loss_value,                
                 'Rank-0 Batch Wise/train_max_lr': max_lr,
                 'Rank-0 Batch Wise/train_min_lr': min_lr
             }, commit=False)

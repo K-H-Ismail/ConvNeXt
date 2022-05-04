@@ -199,12 +199,18 @@ def get_args_parser():
                         help="The name of the W&B project where you're sending the new run.")
     parser.add_argument('--wandb_ckpt', type=str2bool, default=False,
                         help="Save model checkpoints as W&B Artifacts.")
-    
+     
+    # Dcls arguments
     parser.add_argument('--use_dcls', type=str2bool, default=False,
                         help='Enabling dcls convolutions')    
-    parser.add_argument('--dcls_gain', default=1.0, type=float,
-                        help='Dcls gain')    
-
+    parser.add_argument('--dcls_kernel_size', default=7, type=int,
+                        help='Dcls size of dilated kernel')
+    parser.add_argument('--dcls_kernel_count', default=7, type=int,
+                        help='Dcls count of dilated kernel elementsts')
+    parser.add_argument('--dcls_sync', type=str2bool, default=False,
+                        help='Syncing all dcls depthwise layers')
+    parser.add_argument('--use_loss_rep', type=str2bool, default=False,
+                        help='Enabling dcls repulsive loss')
     return parser
 
 def main(args):
@@ -256,7 +262,7 @@ def main(args):
     if global_rank == 0 and wandb_logger and args.use_dcls:
         print("init dcls visualizer")
         print(wandb_logger)        
-        dcls_logger = utils.DclsVisualizer(wandb_logger=wandb_logger, num_bins=7)
+        dcls_logger = utils.DclsVisualizer(wandb_logger=wandb_logger, num_bins=args.dcls_kernel_size)
     else:
         dcls_logger = None
 
@@ -296,7 +302,9 @@ def main(args):
         layer_scale_init_value=args.layer_scale_init_value,
         head_init_scale=args.head_init_scale,
         use_dcls = args.use_dcls,
-        dcls_gain=args.dcls_gain
+        dcls_kernel_size=args.dcls_kernel_size,
+        dcls_kernel_count=args.dcls_kernel_count,
+        dcls_sync=args.dcls_sync,
         )
 
     if args.finetune:
@@ -420,10 +428,10 @@ def main(args):
             log_writer=log_writer, wandb_logger=wandb_logger, start_steps=epoch * num_training_steps_per_epoch,
             lr_schedule_values=lr_schedule_values, wd_schedule_values=wd_schedule_values,
             num_training_steps_per_epoch=num_training_steps_per_epoch, update_freq=args.update_freq,
-            use_amp=args.use_amp, use_dcls=args.use_dcls
+            use_amp=args.use_amp, use_dcls=args.use_dcls, dcls_kernel_size=args.dcls_kernel_size
         )
         if args.use_dcls and global_rank == 0:
-            dcls_logger.log_all_layers(model)
+            dcls_logger.log_all_layers(model, sync = args.dcls_sync)
             
         if args.output_dir and args.save_ckpt:
             if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:

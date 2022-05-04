@@ -13,6 +13,9 @@ from collections import defaultdict, deque
 import datetime
 import numpy as np
 from timm.utils import get_state_dict
+import pandas as  pd
+import plotly.express as px
+import tempfile
 
 from pathlib import Path
 
@@ -249,44 +252,62 @@ class WandbLogger(object):
         self._wandb.define_metric('Global Test/*', step_metric='epoch')
         self._wandb.define_metric('Dcls pos |P| max/*', step_metric='epoch')  
         self._wandb.define_metric('Dcls pos avg speed/*', step_metric='epoch')  
-        self._wandb.define_metric('Dcls heatmap hists/*', step_metric='epoch')          
+        self._wandb.define_metric('Dcls heatmap hists/*', step_metric='epoch')
+        self._wandb.define_metric('Dcls scatters/*', step_metric='epoch')
 
 class DclsVisualizer(object):
-    def __init__(self, wandb_logger=None, num_bins=7, num_stages = 4):
+    def __init__(self, wandb_logger=None, num_bins=7, num_stages = 4, max_epoch=300):
         self.wandb_logger = wandb_logger        
         self.num_bins = num_bins
         self.p_prev = {}
         self.num_stages = num_stages
+        self.epoch = 0
+        self.max_epoch = max_epoch
+        self.df = {}
 
     def log_layer(self, model, stage, block):
         key = 's{stage},b{block}'.format(stage=stage,block=block)
-        p = model.module.stages[stage][block].dwconv
-        numel = p.out_channels * p.in_channels//p.groups * p.kernel_count
-        scaling =  p.gain * math.sqrt(numel)
-        p_grad = p.P.grad
-        p = p.P * scaling
+        p = model.module.stages[stage][block].dwconv if hasattr(model, 'module') else model.stages[stage][block].dwconv
+        out_channels, kernel_count = p.out_channels, p.kernel_count
+        p = p.P * p.scaling
         
         if key not in self.p_prev: 
             self.p_prev[key] = torch.zeros_like(p)
 
         speed = (p - self.p_prev[key]).abs().mean()        
         
-        #self.wandb_logger._wandb.log({'Dcls pos ({stage},{block})/P avg'.format(stage=stage,block=block): p.mean()}) 
-        self.wandb_logger._wandb.log({'Dcls pos |P| max/(s{stage},b{block})'.format(stage=stage,block=block): p.abs().max()})
-        #self.wandb_logger._wandb.log({'Dcls pos ({stage},{block})/P >= 1'.format(stage=stage,block=block): (p[p.abs() >= 1]).numel()/p.numel()})                 
-        #self.wandb_logger._wandb.log({'Dcls pos ({stage},{block})/P_grad avg'.format(stage=stage,block=block): p_grad.mean()})
-        #self.wandb_logger._wandb.log({'Dcls pos ({stage},{block})/P_grad max'.format(stage=stage,block=block): p_grad.abs().max()})  
-        self.wandb_logger._wandb.log({'Dcls pos avg speed/(s{stage},b{block})'.format(stage=stage,block=block): speed}) 
-        
+        self.wandb_logger._wandb.log({'Dcls pos |P| max/(s{stage},b{block})'.format(stage=stage,block=block): p.abs().max()}) 
+        self.wandb_logger._wandb.log({'Dcls pos avg speed/(s{stage},b{block})'.format(stage=stage,block=block): speed})         
         self.wandb_logger._wandb.log({'Dcls heatmap hists/(s{stage},b{block})'.format(stage=stage,block=block): self.wandb_logger._wandb.Histogram(p.detach().cpu(), num_bins=self.num_bins)})        
  
-        
+        step = max(out_channels//4, 1)
+        p_df = p[:,0:-1:step,0,:].clamp(-self.num_bins//2, self.num_bins//2)
+        categories = torch.arange(p_df.size(1)).repeat_interleave(kernel_count)
+        df = pd.DataFrame(p_df.reshape((2, -1)).detach().cpu().numpy().T)
+        df[2]  = categories
+        df[3]  = self.epoch
+
+        self.df[key] = df if key not in self.df else pd.concat([self.df[key], df], ignore_index=True)
+
+        fig = px.scatter(self.df[key], x=0, y=1, color=2, range_x=[-self.num_bins//2,self.num_bins//2], range_y=[-self.num_bins//2,self.num_bins//2], animation_frame=3, size=2)
+
+        step = max(self.max_epoch//4, 1)
+        if self.epoch % step == 0:
+            with tempfile.NamedTemporaryFile() as fp:
+                fig.write_html(fp.name)
+                self.wandb_logger._wandb.log({'Dcls scatters/(s{stage},b{block})'.format(stage=stage,block=block):
+                                              self.wandb_logger._wandb.Html(open(fp.name), inject=False)}) 
+                
         self.p_prev[key] = p
         
-    def log_all_layers(self, model):
+    def log_all_layers(self, model, sync=False):
         for stage in range(self.num_stages):
-            for block in range(model.module.depths[stage]):
-                self.log_layer(model, stage, block) 
+            if sync:
+                self.log_layer(model, stage, 0)
+            else:
+                for block in range(model.module.depths[stage]):
+                    self.log_layer(model, stage, block)
+        self.epoch += 1                
 
 def setup_for_distributed(is_master):
     """

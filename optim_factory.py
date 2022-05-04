@@ -79,7 +79,10 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
             continue  # frozen weights
         if len(param.shape) == 1 or name.endswith(".bias") or name in skip_list:
             group_name = "no_decay"
-            this_weight_decay = 0.           
+            this_weight_decay = 0.
+        elif name.endswith(".P"):
+            group_name = "no_decay_dcls"
+            this_weight_decay = 0.
         else:
             group_name = "decay"
             this_weight_decay = weight_decay
@@ -103,7 +106,8 @@ def get_parameter_groups(model, weight_decay=1e-5, skip_list=(), get_num_layer=N
             parameter_group_vars[group_name] = {
                 "weight_decay": this_weight_decay,
                 "params": [],
-                "lr_scale": scale
+                "lr_scale": scale,
+                "group_name": group_name
             }
 
         parameter_group_vars[group_name]["params"].append(param)
