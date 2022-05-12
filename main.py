@@ -213,6 +213,8 @@ def get_args_parser():
                         help='Syncing all dcls depthwise layers')
     parser.add_argument('--use_loss_rep', type=str2bool, default=False,
                         help='Enabling dcls repulsive loss')
+    parser.add_argument('--dcls_df', type=str, default=None,
+                        help='Dataframe for dcls visualization')
     return parser
 
 def main(args):
@@ -261,13 +263,6 @@ def main(args):
         wandb_logger = utils.WandbLogger(args)
     else:
         wandb_logger = None
-        
-    if global_rank == 0 and wandb_logger and args.use_dcls:
-        print("init dcls visualizer")
-        print(wandb_logger)        
-        dcls_logger = utils.DclsVisualizer(wandb_logger=wandb_logger, num_bins=args.dcls_kernel_size)
-    else:
-        dcls_logger = None
 
     data_loader_train = torch.utils.data.DataLoader(
         dataset_train, sampler=sampler_train,
@@ -406,6 +401,13 @@ def main(args):
         args=args, model=model, model_without_ddp=model_without_ddp,
         optimizer=optimizer, loss_scaler=loss_scaler, model_ema=model_ema)
 
+    if global_rank == 0 and wandb_logger and args.use_dcls:
+        print("init dcls visualizer")
+        print(wandb_logger)
+        dcls_logger = utils.DclsVisualizer(wandb_logger=wandb_logger, num_bins=args.dcls_kernel_size, epoch=args.start_epoch, dcls_df=args.dcls_df)
+
+    else:
+        dcls_logger = None
     if args.eval:
         print(f"Eval only mode")
         test_stats = evaluate(data_loader_val, model, device, use_amp=args.use_amp)
@@ -437,6 +439,8 @@ def main(args):
             dcls_logger.log_all_layers(model, sync = args.dcls_sync)
             
         if args.output_dir and args.save_ckpt:
+            if global_rank == 0 and wandb_logger and args.use_dcls:
+                args.dcls_df = dcls_logger.df
             if (epoch + 1) % args.save_ckpt_freq == 0 or epoch + 1 == args.epochs:
                 utils.save_model(
                     args=args, model=model, model_without_ddp=model_without_ddp, optimizer=optimizer,
@@ -504,3 +508,4 @@ if __name__ == '__main__':
     if args.output_dir:
         Path(args.output_dir).mkdir(parents=True, exist_ok=True)
     main(args)
+

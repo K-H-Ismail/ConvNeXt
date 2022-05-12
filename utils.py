@@ -256,14 +256,17 @@ class WandbLogger(object):
         self._wandb.define_metric('Dcls scatters/*', step_metric='epoch')
 
 class DclsVisualizer(object):
-    def __init__(self, wandb_logger=None, num_bins=7, num_stages = 4, max_epoch=300):
+    def __init__(self, wandb_logger=None, num_bins=7, epoch=0, dcls_df=None, num_stages = 4, max_epoch=300):
         self.wandb_logger = wandb_logger        
         self.num_bins = num_bins
         self.p_prev = {}
         self.num_stages = num_stages
-        self.epoch = 0
+        self.epoch = epoch
         self.max_epoch = max_epoch
         self.df = {}
+
+        if dcls_df is not None:
+            self.df = dcls_df
 
     def log_layer(self, model, stage, block):
         key = 's{stage},b{block}'.format(stage=stage,block=block)
@@ -291,7 +294,7 @@ class DclsVisualizer(object):
 
         fig = px.scatter(self.df[key], x=0, y=1, color=2, range_x=[-self.num_bins//2,self.num_bins//2], range_y=[-self.num_bins//2,self.num_bins//2], animation_frame=3, size=2)
 
-        step = max(self.max_epoch//4, 1)
+        step = max(self.max_epoch//10, 1)
         if self.epoch % step == 0:
             with tempfile.NamedTemporaryFile() as fp:
                 fig.write_html(fp.name)
@@ -565,3 +568,7 @@ def auto_load_model(args, model, model_without_ddp, optimizer, loss_scaler, mode
             if 'scaler' in checkpoint:
                 loss_scaler.load_state_dict(checkpoint['scaler'])
             print("With optim & sched!")
+            
+        if args.use_dcls and 'args' in checkpoint:
+            args.dcls_df = checkpoint['args'].dcls_df
+
