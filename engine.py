@@ -60,7 +60,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
             loss = criterion(output, targets)
         
         loss_rep = torch.zeros_like(loss)
-        loss_fit = loss
+        loss_fit = loss.item()
         if use_dcls:
             layer_count = 0
             for name, param in model.named_parameters():
@@ -74,7 +74,7 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                     loss_rep += 2*torch.sum(torch.clamp_min(distances_triu , min=0)) / (k_count*(k_count-1)*chout*chin)
             loss_rep /= layer_count
 
-            loss = loss + loss_rep ** 2
+            loss = loss + loss_rep ** 2 if epoch > 20 else loss
                     
         loss_value = loss.item() 
 
@@ -101,16 +101,16 @@ def train_one_epoch(model: torch.nn.Module, criterion: torch.nn.Module,
                 optimizer.zero_grad()
                 if model_ema is not None:
                     model_ema.update(model)
-
         if use_dcls:            
             with torch.no_grad():
                 lim = dcls_kernel_size // 2
                 for i in range(4):
                     if hasattr(model, 'module'):
-                        model.module.stages[i][0].dwconv.P.clamp_(-lim, lim)
+                        for j in range(len(model.module.stages[i])):
+                            model.module.stages[i][j].dwconv.P.clamp_(-lim, lim)
                     else:
-                        model.stages[i][0].dwconv.P.clamp_(-lim, lim)
-
+                        for j in range(len(model.stages[i])):
+                            model.stages[i][j].dwconv.P.clamp_(-lim, lim)
         torch.cuda.synchronize()
 
         if mixup_fn is None:
