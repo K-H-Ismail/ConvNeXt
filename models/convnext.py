@@ -101,7 +101,7 @@ class ConvNeXt(nn.Module):
                 with torch.no_grad():
                     lim = dcls_kernel_size//2               
                     scaling = 1
-                    torch.nn.init.normal_(P, 0, 1).clamp_(-lim,lim).div_(scaling)
+                    torch.nn.init.normal_(P, 0, 0.5).clamp_(-lim,lim).div_(scaling)
                     P = Parameter(P.detach().clone())
                 self.P_stages.append(P)         
           
