@@ -16,6 +16,7 @@ from timm.utils import get_state_dict
 import pandas as  pd
 import plotly.express as px
 import tempfile
+import hostlist
 
 from pathlib import Path
 
@@ -208,7 +209,7 @@ class WandbLogger(object):
                 "Run `pip install wandb` to install it."
             )
 
-        # Initialize a W&B run 
+        # Initialize a W&B run
         if self._wandb.run is None:
             self._wandb.init(
                 project=args.project,
@@ -250,14 +251,14 @@ class WandbLogger(object):
         # Set epoch-wise step
         self._wandb.define_metric('Global Train/*', step_metric='epoch')
         self._wandb.define_metric('Global Test/*', step_metric='epoch')
-        self._wandb.define_metric('Dcls pos |P| max/*', step_metric='epoch')  
-        self._wandb.define_metric('Dcls pos avg speed/*', step_metric='epoch')  
+        self._wandb.define_metric('Dcls pos |P| max/*', step_metric='epoch')
+        self._wandb.define_metric('Dcls pos avg speed/*', step_metric='epoch')
         self._wandb.define_metric('Dcls heatmap hists/*', step_metric='epoch')
         self._wandb.define_metric('Dcls scatters/*', step_metric='epoch')
 
 class DclsVisualizer(object):
     def __init__(self, wandb_logger=None, num_bins=7, epoch=0, dcls_df=None, num_stages = 4, max_epoch=300):
-        self.wandb_logger = wandb_logger        
+        self.wandb_logger = wandb_logger
         self.num_bins = num_bins
         self.p_prev = {}
         self.num_stages = num_stages
@@ -273,16 +274,17 @@ class DclsVisualizer(object):
         p = model.module.stages[stage][block].dwconv if hasattr(model, 'module') else model.stages[stage][block].dwconv
         out_channels, kernel_count = p.out_channels, p.kernel_count
         p = p.P * p.scaling
-        
-        if key not in self.p_prev: 
+
+        if key not in self.p_prev:
             self.p_prev[key] = torch.zeros_like(p)
 
-        speed = (p - self.p_prev[key]).abs().mean()        
-        
-        self.wandb_logger._wandb.log({'Dcls pos |P| max/(s{stage},b{block})'.format(stage=stage,block=block): p.abs().max()}) 
-        self.wandb_logger._wandb.log({'Dcls pos avg speed/(s{stage},b{block})'.format(stage=stage,block=block): speed})         
-        self.wandb_logger._wandb.log({'Dcls heatmap hists/(s{stage},b{block})'.format(stage=stage,block=block): self.wandb_logger._wandb.Histogram(p.detach().cpu(), num_bins=self.num_bins)})        
- 
+        speed = (p - self.p_prev[key]).abs().mean()
+
+        self.wandb_logger._wandb.log({'Dcls pos |P| max/(s{stage},b{block})'.format(stage=stage,block=block): p.abs().max()})
+        self.wandb_logger._wandb.log({'Dcls pos avg speed/(s{stage},b{block})'.format(stage=stage,block=block): speed})
+        self.wandb_logger._wandb.log({'Dcls heatmap hists/(s{stage},b{block})'.format(stage=stage,block=block):
+                                      self.wandb_logger._wandb.Histogram(p.detach().cpu(), num_bins=self.num_bins)})
+
         step = max(out_channels//4, 1)
         p_df = p[:,0:-1:step,0,:].clamp(-self.num_bins//2, self.num_bins//2)
         categories = torch.arange(p_df.size(1)).repeat_interleave(kernel_count)
@@ -292,17 +294,18 @@ class DclsVisualizer(object):
 
         self.df[key] = df if key not in self.df else pd.concat([self.df[key], df], ignore_index=True)
 
-        fig = px.scatter(self.df[key], x=0, y=1, color=2, range_x=[-self.num_bins//2,self.num_bins//2], range_y=[-self.num_bins//2,self.num_bins//2], animation_frame=3, size=2)
-
-        step = max(self.max_epoch//10, 1)
+        step = max(self.max_epoch//3, 1)
         if self.epoch % step == 0:
+            fig = px.scatter(self.df[key], x=0, y=1, color=2,
+                             range_x=[-self.num_bins//2,self.num_bins//2],
+                             range_y=[-self.num_bins//2,self.num_bins//2],
+                             animation_frame=3, size=2)
             with tempfile.NamedTemporaryFile() as fp:
                 fig.write_html(fp.name)
                 self.wandb_logger._wandb.log({'Dcls scatters/(s{stage},b{block})'.format(stage=stage,block=block):
-                                              self.wandb_logger._wandb.Html(open(fp.name), inject=False)}) 
-                
+                                              self.wandb_logger._wandb.Html(open(fp.name), inject=False)})
         self.p_prev[key] = p
-        
+
     def log_all_layers(self, model, sync=False):
         for stage in range(self.num_stages):
             if sync:
@@ -310,7 +313,7 @@ class DclsVisualizer(object):
             else:
                 for block in range(model.module.depths[stage]):
                     self.log_layer(model, stage, block)
-        self.epoch += 1                
+        self.epoch += 1
 
 def setup_for_distributed(is_master):
     """
@@ -357,7 +360,6 @@ def save_on_master(*args, **kwargs):
 
 
 def init_distributed_mode(args):
-
     if args.dist_on_itp:
         args.rank = int(os.environ['OMPI_COMM_WORLD_RANK'])
         args.world_size = int(os.environ['OMPI_COMM_WORLD_SIZE'])
@@ -378,6 +380,16 @@ def init_distributed_mode(args):
         os.environ['RANK'] = str(args.rank)
         os.environ['LOCAL_RANK'] = str(args.gpu)
         os.environ['WORLD_SIZE'] = str(args.world_size)
+
+        # get node list from slurm
+        hostnames = hostlist.expand_hostlist(os.environ['SLURM_JOB_NODELIST'])
+
+        # get IDs of reserved GPU
+        gpu_ids = os.environ['SLURM_STEP_GPUS'].split(",")
+
+        # define MASTER_ADD & MASTER_PORT
+        os.environ['MASTER_ADDR'] = hostnames[0]
+        os.environ['MASTER_PORT'] = str(12345 + int(min(gpu_ids))) # to avoid port conflict on the same node
     else:
         print('Not using distributed mode')
         args.distributed = False
@@ -389,11 +401,10 @@ def init_distributed_mode(args):
     args.dist_backend = 'nccl'
     print('| distributed init (rank {}): {}, gpu {}'.format(
         args.rank, args.dist_url, args.gpu), flush=True)
-    torch.distributed.init_process_group(backend=args.dist_backend, init_method=args.dist_url,
+    torch.distributed.init_process_group(backend=args.dist_backend, init_method="env://",
                                          world_size=args.world_size, rank=args.rank)
     torch.distributed.barrier()
     setup_for_distributed(args.rank == 0)
-
 
 def load_state_dict(model, state_dict, prefix='', ignore_missing="relative_position_index"):
     missing_keys = []
@@ -524,7 +535,7 @@ def save_model(args, epoch, model, model_without_ddp, optimizer, loss_scaler, mo
             to_save['model_ema'] = get_state_dict(model_ema)
 
         save_on_master(to_save, checkpoint_path)
-    
+
     if is_main_process() and isinstance(epoch, int):
         to_del = epoch - args.save_ckpt_num * args.save_ckpt_freq
         old_ckpt = output_dir / ('checkpoint-%s.pth' % to_del)
@@ -568,7 +579,7 @@ def auto_load_model(args, model, model_without_ddp, optimizer, loss_scaler, mode
             if 'scaler' in checkpoint:
                 loss_scaler.load_state_dict(checkpoint['scaler'])
             print("With optim & sched!")
-            
+
         if args.use_dcls and 'args' in checkpoint:
             args.dcls_df = checkpoint['args'].dcls_df
 
