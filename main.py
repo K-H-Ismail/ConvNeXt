@@ -27,7 +27,7 @@ from timm.utils import ModelEma
 from optim_factory import create_optimizer, LayerDecayValueAssigner
 
 from datasets import build_dataset
-from engine import train_one_epoch, evaluate
+from engine import train_one_epoch, evaluate, visualize_erf
 
 from utils import NativeScalerWithGradNormCount as NativeScaler
 import utils
@@ -37,7 +37,7 @@ import models.convmixer
 
 def str2bool(v):
     """
-    Converts string to bool type; enables command line 
+    Converts string to bool type; enables command line
     arguments in the format of '--arg1 true --arg2 false'
     """
     if isinstance(v, bool):
@@ -191,20 +191,22 @@ def get_args_parser():
     parser.add_argument('--dist_url', default='env://',
                         help='url used to set up distributed training')
 
-    parser.add_argument('--use_amp', type=str2bool, default=False, 
+    parser.add_argument('--use_amp', type=str2bool, default=False,
                         help="Use PyTorch's AMP (Automatic Mixed Precision) or not")
 
     # Weights and Biases arguments
     parser.add_argument('--enable_wandb', type=str2bool, default=False,
                         help="enable logging to Weights and Biases")
+    parser.add_argument('--online_wandb', type=str2bool, default=True,
+                        help="enable online logging to Weights and Biases")
     parser.add_argument('--project', default='convnext', type=str,
                         help="The name of the W&B project where you're sending the new run.")
     parser.add_argument('--wandb_ckpt', type=str2bool, default=False,
                         help="Save model checkpoints as W&B Artifacts.")
-     
+
     # Dcls arguments
     parser.add_argument('--use_dcls', type=str2bool, default=False,
-                        help='Enabling dcls convolutions')    
+                        help='Enabling dcls convolutions')
     parser.add_argument('--dcls_kernel_size', default=7, type=int,
                         help='Dcls size of dilated kernel')
     parser.add_argument('--dcls_kernel_count', default=7, type=int,
@@ -215,6 +217,8 @@ def get_args_parser():
                         help='Enabling dcls repulsive loss')
     parser.add_argument('--dcls_df', type=str, default=None,
                         help='Dataframe for dcls visualization')
+    parser.add_argument('--show_erf', type=str2bool, default=True,
+                        help='ERF visualization')
     return parser
 
 def main(args):
@@ -260,6 +264,7 @@ def main(args):
         log_writer = None
 
     if global_rank == 0 and args.enable_wandb:
+        os.environ['WANDB_MODE'] = 'online' if args.online_wandb else 'offline'
         wandb_logger = utils.WandbLogger(args)
     else:
         wandb_logger = None
@@ -293,9 +298,9 @@ def main(args):
             label_smoothing=args.smoothing, num_classes=args.nb_classes)
 
     model = create_model(
-        args.model, 
-        pretrained=False, 
-        num_classes=args.nb_classes, 
+        args.model,
+        pretrained=False,
+        num_classes=args.nb_classes,
         drop_path_rate=args.drop_path,
         layer_scale_init_value=args.layer_scale_init_value,
         head_init_scale=args.head_init_scale,
@@ -370,7 +375,7 @@ def main(args):
 
     optimizer = create_optimizer(
         args, model_without_ddp, skip_list=None,
-        get_num_layer=assigner.get_layer_id if assigner is not None else None, 
+        get_num_layer=assigner.get_layer_id if assigner is not None else None,
         get_layer_scale=assigner.get_scale if assigner is not None else None)
 
     loss_scaler = NativeScaler() # if args.use_amp is False, this won't be used
@@ -412,6 +417,11 @@ def main(args):
         print(f"Eval only mode")
         test_stats = evaluate(data_loader_val, model, device, use_amp=args.use_amp)
         print(f"Accuracy of the network on {len(dataset_val)} test images: {test_stats['acc1']:.5f}%")
+        if args.model_ema and args.model_ema_eval:
+            if args.show_erf:
+                visualize_erf(model_ema.ema, args)
+            test_stats_ema = evaluate(data_loader_val, model_ema.ema, device, use_amp=args.use_amp)
+            print(f"Accuracy of the model EMA on {len(dataset_val)} test images: {test_stats_ema['acc1']:.1f}%")
         return
 
     max_accuracy = 0.0
@@ -437,7 +447,7 @@ def main(args):
         )
         if args.use_dcls and global_rank == 0:
             dcls_logger.log_all_layers(model, sync = args.dcls_sync)
-            
+
         if args.output_dir and args.save_ckpt:
             if global_rank == 0 and wandb_logger and args.use_dcls:
                 args.dcls_df = dcls_logger.df
