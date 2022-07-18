@@ -7,33 +7,37 @@
 
 
 _base_ = [
-    '../_base_/models/upernet_convnext.py', '../_base_/datasets/ade20k.py',
+    '../_base_/models/upernet_convnext_dcls.py', '../_base_/datasets/ade20k_640x640.py',
     '../_base_/default_runtime.py', '../_base_/schedules/schedule_160k.py'
 ]
-crop_size = (512, 512)
+crop_size = (640, 640)
 
 model = dict(
     backbone=dict(
-        type='ConvNeXt',
+        type='ConvNeXt_dcls',
         in_chans=3,
         depths=[3, 3, 27, 3],
-        dims=[96, 192, 384, 768],
-        drop_path_rate=0.3,
+        dims=[256, 512, 1024, 2048],
+        drop_path_rate=0.4,
         layer_scale_init_value=1.0,
         out_indices=[0, 1, 2, 3],
+        dcls_kernel_size=17,
+        dcls_kernel_count=40,
+        dcls_sync=True
     ),
     decode_head=dict(
-        in_channels=[96, 192, 384, 768],
+        in_channels=[256, 512, 1024, 2048],
         num_classes=150,
     ),
     auxiliary_head=dict(
-        in_channels=384,
+        in_channels=1024,
         num_classes=150
     ),
+    test_cfg = dict(mode='slide', crop_size=crop_size, stride=(426, 426)),
 )
 
 optimizer = dict(constructor='LearningRateDecayOptimizerConstructor', _delete_=True, type='AdamW',
-                 lr=0.0001, betas=(0.9, 0.999), weight_decay=0.05,
+                 lr=0.00008, betas=(0.9, 0.999), weight_decay=0.05,
                  paramwise_cfg={'decay_rate': 0.9,
                                 'decay_type': 'stage_wise',
                                 'num_layers': 12})
@@ -57,5 +61,5 @@ optimizer_config = dict(
     grad_clip=None,
     coalesce=True,
     bucket_size_mb=-1,
-    use_fp16=True,
+    use_fp16=False,
 )

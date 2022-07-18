@@ -7,20 +7,23 @@
 
 
 _base_ = [
-    '../_base_/models/upernet_convnext.py', '../_base_/datasets/ade20k.py',
+    '../_base_/models/upernet_convnext_dcls.py', '../_base_/datasets/ade20k.py',
     '../_base_/default_runtime.py', '../_base_/schedules/schedule_160k.py'
 ]
 crop_size = (512, 512)
 
 model = dict(
     backbone=dict(
-        type='ConvNeXt',
+        type='ConvNeXt_dcls',
         in_chans=3,
-        depths=[3, 3, 27, 3],
+        depths=[3, 3, 9, 3],
         dims=[96, 192, 384, 768],
-        drop_path_rate=0.3,
+        drop_path_rate=0.4,
         layer_scale_init_value=1.0,
         out_indices=[0, 1, 2, 3],
+        dcls_kernel_size=17,
+        dcls_kernel_count=34,
+        dcls_sync=True
     ),
     decode_head=dict(
         in_channels=[96, 192, 384, 768],
@@ -36,7 +39,7 @@ optimizer = dict(constructor='LearningRateDecayOptimizerConstructor', _delete_=T
                  lr=0.0001, betas=(0.9, 0.999), weight_decay=0.05,
                  paramwise_cfg={'decay_rate': 0.9,
                                 'decay_type': 'stage_wise',
-                                'num_layers': 12})
+                                'num_layers': 6})
 
 lr_config = dict(_delete_=True, policy='poly',
                  warmup='linear',

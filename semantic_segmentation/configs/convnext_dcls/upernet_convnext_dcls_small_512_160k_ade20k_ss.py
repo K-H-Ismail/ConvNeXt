@@ -7,20 +7,23 @@
 
 
 _base_ = [
-    '../_base_/models/upernet_convnext.py', '../_base_/datasets/ade20k.py',
+    '../_base_/models/upernet_convnext_dcls.py', '../_base_/datasets/ade20k.py',
     '../_base_/default_runtime.py', '../_base_/schedules/schedule_160k.py'
 ]
 crop_size = (512, 512)
 
 model = dict(
     backbone=dict(
-        type='ConvNeXt',
+        type='ConvNeXt_dcls',
         in_chans=3,
         depths=[3, 3, 27, 3],
         dims=[96, 192, 384, 768],
         drop_path_rate=0.3,
         layer_scale_init_value=1.0,
         out_indices=[0, 1, 2, 3],
+        dcls_kernel_size=17,
+        dcls_kernel_count=40,
+        dcls_sync=True
     ),
     decode_head=dict(
         in_channels=[96, 192, 384, 768],
@@ -30,6 +33,7 @@ model = dict(
         in_channels=384,
         num_classes=150
     ),
+    test_cfg = dict(mode='slide', crop_size=crop_size, stride=(341, 341)),
 )
 
 optimizer = dict(constructor='LearningRateDecayOptimizerConstructor', _delete_=True, type='AdamW',
