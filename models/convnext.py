@@ -12,7 +12,6 @@ import torch.nn.functional as F
 from timm.models.layers import trunc_normal_, DropPath
 from timm.models.registry import register_model
 from DCLS.construct.modules.Dcls import  Dcls2d as cDcls2d
-from torch.nn.parameter import Parameter
 
 class Block(nn.Module):
     r""" ConvNeXt Block. There are two equivalent implementations:
@@ -102,7 +101,7 @@ class ConvNeXt(nn.Module):
                     lim = dcls_kernel_size//2               
                     scaling = 1
                     torch.nn.init.normal_(P, 0, 0.5).clamp_(-lim,lim).div_(scaling)
-                    P = Parameter(P.detach().clone())
+                    P = nn.Parameter(P.detach().clone())
                 self.P_stages.append(P)         
           
         for i in range(4):
