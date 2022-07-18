@@ -97,6 +97,8 @@ def main():
     if args.comment:
         kwargs['slurm_comment'] = args.comment
 
+    kwargs['slurm_constraint'] = args.constraint
+
     executor.update_parameters(
         #mem_gb=40 * num_gpus_per_node,
         gpus_per_node=num_gpus_per_node,
