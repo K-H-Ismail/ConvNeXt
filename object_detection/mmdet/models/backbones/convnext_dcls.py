@@ -11,6 +11,7 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from timm.models.layers import trunc_normal_, DropPath
+from DCLS.construct.modules.Dcls import  Dcls2d as cDcls2d
 
 from mmcv_custom import load_checkpoint
 from mmdet.utils import get_root_logger
@@ -31,7 +32,7 @@ class Block(nn.Module):
                  dcls_kernel_count=34):
         super().__init__()
         self.dwconv = cDcls2d(dim, dim, kernel_count=dcls_kernel_count, dilated_kernel_size=dcls_kernel_size,
-                              padding=dcls_kernel_size//2, groups=dim, scaling=1)
+                              padding=dcls_kernel_size//2, groups=dim, scaling=1, use_implicit_gemm=False)
         if P is not None:
             self.dwconv.P = P
         self.norm = LayerNorm(dim, eps=1e-6)

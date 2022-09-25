@@ -18,7 +18,6 @@ from mmcv_custom import load_checkpoint
 from mmseg.utils import get_root_logger
 from mmseg.models.builder import BACKBONES
 
-
 class Block(nn.Module):
     r""" ConvNeXt Block. There are two equivalent implementations:
     (1) DwConv -> LayerNorm (channels_first) -> 1x1 Conv -> GELU -> 1x1 Conv; all in (N, C, H, W)
@@ -34,7 +33,7 @@ class Block(nn.Module):
                  dcls_kernel_count=34):
         super().__init__()
         self.dwconv = cDcls2d(dim, dim, kernel_count=dcls_kernel_count, dilated_kernel_size=dcls_kernel_size,
-                              padding=dcls_kernel_size//2, groups=dim, scaling=1)
+                              padding=dcls_kernel_size//2, groups=dim, scaling=1, use_implicit_gemm=False)
         if P is not None:
             self.dwconv.P = P
         self.norm = LayerNorm(dim, eps=1e-6)
