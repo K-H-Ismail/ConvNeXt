@@ -86,6 +86,7 @@ class LearningRateDecayOptimizerConstructor(DefaultOptimizerConstructor):
             elif name.endswith(".P"):
                 group_name = "no_decay_dcls"
                 this_weight_decay = 0.
+                scale = 5
             else:
                 group_name = "decay"
                 this_weight_decay = weight_decay
