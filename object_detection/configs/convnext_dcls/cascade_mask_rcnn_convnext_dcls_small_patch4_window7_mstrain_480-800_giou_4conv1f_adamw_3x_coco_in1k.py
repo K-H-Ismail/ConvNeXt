@@ -15,11 +15,14 @@ _base_ = [
 model = dict(
     backbone=dict(
         in_chans=3,
-        depths=[3, 3, 27, 3], 
-        dims=[96, 192, 384, 768], 
+        depths=[3, 3, 27, 3],
+        dims=[96, 192, 384, 768],
         drop_path_rate=0.6,
         layer_scale_init_value=1.0,
         out_indices=[0, 1, 2, 3],
+        dcls_kernel_size=17,
+        dcls_kernel_count=40,
+        dcls_sync=True
     ),
     neck=dict(in_channels=[96, 192, 384, 768]),
     roi_head=dict(
@@ -127,7 +130,7 @@ train_pipeline = [
 ]
 data = dict(train=dict(pipeline=train_pipeline))
 
-optimizer = dict(constructor='LearningRateDecayOptimizerConstructor', _delete_=True, type='AdamW', 
+optimizer = dict(constructor='LearningRateDecayOptimizerConstructor', _delete_=True, type='AdamW',
                  lr=0.0002, betas=(0.9, 0.999), weight_decay=0.05,
                  paramwise_cfg={'decay_rate': 0.7,
                                 'decay_type': 'layer_wise',
