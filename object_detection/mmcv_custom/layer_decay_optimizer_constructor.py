@@ -83,6 +83,10 @@ class LearningRateDecayOptimizerConstructor(DefaultOptimizerConstructor):
             if len(param.shape) == 1 or name.endswith(".bias") or name in ('pos_embed', 'cls_token'):
                 group_name = "no_decay"
                 this_weight_decay = 0.
+            elif name.endswith(".P"):
+                group_name = "no_decay_dcls"
+                this_weight_decay = 0.
+                scale = 5
             else:
                 group_name = "decay"
                 this_weight_decay = weight_decay
